@@ -1,0 +1,11 @@
+services:
+  evaluation-api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      EVALUATION_ARTIFACT_DIR: /app/artifacts/docker-demo
+    volumes:
+      - evaluation-artifacts:/app/artifacts
+volumes:
+  evaluation-artifacts:

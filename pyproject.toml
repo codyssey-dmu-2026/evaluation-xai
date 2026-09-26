@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codyssey-evaluation-xai"
+version = "0.1.0"
+description = "Data-independent evaluation and explainability for the Codyssey robo-advisor"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "numpy>=2.1,<3",
+  "pandas>=2.2,<3",
+  "scipy>=1.14,<2",
+  "statsmodels>=0.14,<0.16",
+  "pydantic>=2.9,<3",
+  "pyarrow>=18,<25",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "matplotlib>=3.9,<4",
+]
+
+[project.optional-dependencies]
+xai = ["shap>=0.48,<0.53"]
+dev = ["pytest>=8,<10", "pytest-cov>=6,<8", "black>=24,<27", "flake8>=7,<8", "httpx>=0.27,<0.29"]
+
+[project.scripts]
+evaluation-xai = "evaluation_xai.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.black]
+line-length = 88
+target-version = ["py312", "py313"]
+
+[tool.coverage.run]
+source = ["evaluation_xai"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
