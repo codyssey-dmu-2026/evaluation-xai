@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+artifacts
+data
+models
+__pycache__
+.pytest_cache
+.coverage
+tests
