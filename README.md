@@ -110,6 +110,3 @@ Docker 검증 여부는 PR 검증 기록을 확인한다.
 참고: [과제](https://nimble-ceder-40b.notion.site/38_-RAG-1bd17efd202c831fb96381f11fb17539),
 [SHAP](https://shap.readthedocs.io/), [statsmodels](https://www.statsmodels.org/),
 [Stable-Baselines3](https://stable-baselines3.readthedocs.io/).
-
-본 시스템은 교육용이며 실제 투자 조언에 사용할 수 없다.
-백테스트 성과는 미래 수익을 보장하지 않는다.
