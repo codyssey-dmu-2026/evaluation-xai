@@ -8,8 +8,6 @@
 
 ## 바로 실행
 
-Python 3.12 또는 3.13. 로컬 검증 환경은 M3 Mac / Python 3.13이며 GPU가 필요 없다.
-
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
