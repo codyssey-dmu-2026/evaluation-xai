@@ -1,5 +1,9 @@
 # 팀 전달 자료와 연결 계약
 
+[평가 기준 요약](evaluation_criteria.md) · [상세 기준서](evaluation_specification.md) · [구현 상태와 차이](implementation_status.md)
+
+이 문서는 현재 코드에 연결할 입력 중심이다. 상세 기준서 9절은 최종 목표 계약이므로 파일명·필드가 모두 같지는 않다. 연동 시 구현 상태 문서의 차이표를 먼저 확인한다.
+
 ## 현재 Data Pipeline 확인 결과
 
 2026-09-26 `codyssey-dmu-2026/data-pipeline` commit

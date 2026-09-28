@@ -6,6 +6,16 @@
 > 데모는 가상 가격과 예시 정책을 사용한다. 실제 투자 성과, PPO 학습 완료,
 > 과제 성능 기준 충족을 의미하지 않는다. 수집·전처리와 PPO 학습은 다른 팀원의 역할이다.
 
+## 평가 기준부터 읽기
+
+- **[평가 기준 요약](docs/evaluation_criteria.md)**: 과제 필수조건, 담당자가 정한 기본값, 목표 판정 방법.
+- **[상세 기준서](docs/evaluation_specification.md)**: 12개 지표 계산식, Walk-Forward, 거래·통계·SHAP 기준과 목표 전달 규격.
+- **[현재 구현 상태와 차이](docs/implementation_status.md)**: 기준서 중 구현된 항목과 실자료 연동·검증이 남은 항목.
+- [전체 문서 안내](docs/README.md) · [팀원에게 받을 자료](docs/team_handoff.md)
+
+기존 미국 ETF 10개 연구안은 팀 최종 자산 구성의 확정본이 아니다.
+혼합 시장 사용 시 자산·기준통화·환율·달력·벤치마크/RF를 먼저 합의한다.
+
 ## 바로 실행
 
 ```bash
@@ -101,7 +111,10 @@ Docker 검증 여부는 PR 검증 기록을 확인한다.
 
 ## 읽을 문서
 
-- [평가 규칙](docs/evaluation_protocol.md)
+- [평가 문서 안내](docs/README.md)
+- [평가 기준 요약](docs/evaluation_criteria.md)
+- [상세 기준서](docs/evaluation_specification.md)
+- [현재 구현 상태와 차이](docs/implementation_status.md)
 - [팀원에게 받을 자료와 연동 주의점](docs/team_handoff.md)
 - [남은 개발 순서](docs/roadmap.md)
 
