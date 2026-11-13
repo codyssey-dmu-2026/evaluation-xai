@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import DISCLAIMER
@@ -74,6 +75,12 @@ def create_app(artifact_directory=None):
             raise HTTPException(404, "Unknown evaluation run.")
         if request.decision_id not in run.get("decision_ids", []):
             raise HTTPException(404, "Unknown decision.")
+        if data.get("data_mode") == "synthetic" and not request.allow_synthetic:
+            raise HTTPException(
+                409,
+                "Synthetic demonstration, not a trading decision. "
+                "Opt in with allow_synthetic=true.",
+            )
         key = f"{request.run_id}/{request.decision_id}"
         explanation = data.get("explanations", {}).get(key)
         if explanation is None:
@@ -86,6 +93,11 @@ def create_app(artifact_directory=None):
         i = explanation["asset_names"].index(request.target_asset)
         return {
             "data_mode": data["data_mode"],
+            "explanation_scope": (
+                "synthetic_demonstration_not_trading_decision"
+                if data["data_mode"] == "synthetic"
+                else "policy_attribution"
+            ),
             "run_id": request.run_id,
             "decision_id": request.decision_id,
             "target_asset": request.target_asset,
@@ -98,6 +110,43 @@ def create_app(artifact_directory=None):
             "interpretation": explanation["interpretation"],
             "disclaimer": DISCLAIMER,
         }
+
+    @app.get("/explanations/{run_id}/{decision_id}/{target_asset}/plots/{kind}")
+    def explanation_plot(
+        run_id: str,
+        decision_id: str,
+        target_asset: str,
+        kind: str,
+        allow_synthetic: bool = False,
+    ):
+        data = bundle()
+        if data.get("data_mode") == "synthetic" and not allow_synthetic:
+            raise HTTPException(409, "Synthetic plot requires allow_synthetic=true.")
+        if kind not in {"summary", "force"}:
+            raise HTTPException(404, "Unknown plot kind.")
+        key = f"{run_id}/{decision_id}/{target_asset}"
+        relative = data.get("plot_artifacts", {}).get(key, {}).get(kind)
+        if not isinstance(relative, str):
+            raise HTTPException(404, "No computed plot for this decision and asset.")
+        path = (directory / relative).resolve()
+        suffix = ".png" if kind == "summary" else ".html"
+        if not path.is_relative_to(directory.resolve()) or path.suffix != suffix:
+            raise HTTPException(503, "Invalid plot artifact path.")
+        if not path.is_file():
+            raise HTTPException(404, "Plot artifact missing.")
+        return FileResponse(
+            path,
+            media_type="image/png" if kind == "summary" else "text/html",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "X-Evaluation-Data-Mode": data["data_mode"],
+                "Content-Security-Policy": (
+                    "sandbox allow-scripts; default-src 'none'; "
+                    "script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                    "img-src data:"
+                ),
+            },
+        )
 
     return app
 

@@ -1,0 +1,6 @@
+# Optional: checkpoint replay. Original checkpoint: SB3 2.3.0 / torch 2.14.1.
+# Compatible patch used by the RL team's requirements; CPU load checked locally.
+-r requirements.txt
+stable-baselines3==2.3.2
+gymnasium==0.29.1
+torch==2.14.1

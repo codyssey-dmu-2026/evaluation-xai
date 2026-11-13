@@ -1,5 +1,7 @@
 """Exploratory ANOVA and paired block bootstrap; not IID claims about markets."""
 
+import re
+
 import numpy as np
 import pandas as pd
 from scipy.stats import levene, shapiro
@@ -17,27 +19,32 @@ def mission_anova(rewards, strategies, strategy_regime):
     Inputs are aligned monthly observations, already averaged across seeds.
     Tukey is conditional on raw p<.05 as specified by the mission.
     """
-    required_tables = [
-        (rewards, "strategy"),
-        (strategies, "strategy"),
-        (strategy_regime, "strategy"),
-        (strategy_regime, "regime"),
-    ]
-    if any(
-        column not in table or table[column].nunique() != 3
-        for table, column in required_tables
+    results = {}
+    for name, table, two_way in (
+        ("reward_variants", rewards, False),
+        ("strategies", strategies, False),
+        ("strategy_by_regime", strategy_regime, True),
     ):
+        factors = ["strategy", "regime"] if two_way else ["strategy"]
+        if table is None or any(
+            col not in table or table[col].nunique() != 3 for col in factors
+        ):
+            results[name] = {
+                "status": "incomplete",
+                "reason": "three levels per mission factor required",
+            }
+            continue
+        try:
+            results[name] = anova(table, two_way=two_way)
+        except DataContractError as exc:
+            results[name] = {"status": "data_invalid", "reason": str(exc)}
+    if any(result["status"] != "ok" for result in results.values()):
         return {
             "status": "incomplete",
-            "reason": "three levels per mission factor required",
+            "tests": results,
+            "holm_status": "incomplete_family",
+            "holm_family_size": 5,
         }
-    results = {
-        "reward_variants": anova(rewards),
-        "strategies": anova(strategies),
-        "strategy_by_regime": anova(strategy_regime, two_way=True),
-    }
-    if any(result["status"] != "ok" for result in results.values()):
-        return {"status": "incomplete", "tests": results}
     effects = [effect for result in results.values() for effect in result["effects"]]
     adjusted = multipletests([e["p_value"] for e in effects], method="holm")[1]
     for effect, p_value in zip(effects, adjusted):
@@ -74,18 +81,46 @@ def market_regimes(benchmark_prices: pd.Series, months, lookback=60, threshold=0
     return result
 
 
-def aggregate_seeds(frame: pd.DataFrame, expected_seeds=(11, 22, 33)):
-    """Input: month, strategy, seed, return. Never replicate baseline samples."""
+def normalize_monthly_samples(frame: pd.DataFrame):
+    """Reject daily dates; canonicalize monthly Periods without regrouping returns."""
     required = {"month", "strategy", "seed", "return"}
     if not required.issubset(frame.columns) or frame.empty:
         raise DataContractError("seed table missing required fields")
+    frame = frame.copy()
+    months = []
+    for month in frame["month"]:
+        if isinstance(month, pd.Period) and month.freqstr == "M":
+            months.append(str(month))
+        elif isinstance(month, str) and re.fullmatch(
+            r"[0-9]{4}-(0[1-9]|1[0-2])", month
+        ):
+            if month.startswith("0000"):
+                raise DataContractError("month must be YYYY-MM or a monthly Period")
+            months.append(month)
+        else:
+            raise DataContractError("month must be YYYY-MM or a monthly Period")
+    frame["month"] = months
+    if not frame.strategy.map(lambda s: isinstance(s, str) and bool(s.strip())).all():
+        raise DataContractError("strategy must be a nonempty string")
     if not np.isfinite(frame["return"]).all() or (frame["return"] <= -1).any():
         raise DataContractError("invalid monthly returns")
+    if frame.duplicated(["month", "strategy", "seed"]).any():
+        raise DataContractError("duplicate month/strategy/seed sample")
+    return frame
+
+
+def aggregate_seeds(frame: pd.DataFrame, expected_seeds=(11, 22, 33)):
+    """Only named deterministic baselines may omit seeds; PPO never may."""
+    frame = normalize_monthly_samples(frame)
+    if not expected_seeds or len(set(expected_seeds)) != len(expected_seeds):
+        raise DataContractError("expected seeds must be nonempty and unique")
     rows = []
     for (month, strategy), group in frame.groupby(["month", "strategy"]):
-        if group.seed.isna().all():
-            if len(group) != 1:
-                raise DataContractError("baseline must occur once per month")
+        if strategy.casefold() in {"mvo", "ew", "equalweight", "equal_weight"}:
+            if len(group) != 1 or not group.seed.isna().all():
+                raise DataContractError(
+                    "baseline must occur once per month without seed"
+                )
         elif group.seed.isna().any() or sorted(group.seed.tolist()) != sorted(
             expected_seeds
         ):

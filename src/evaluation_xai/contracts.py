@@ -44,6 +44,7 @@ class ExplainRequest(BaseModel):
     run_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     decision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     target_asset: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,30}$")
+    allow_synthetic: bool = False
 
 
 class MarketDataManifest(BaseModel):

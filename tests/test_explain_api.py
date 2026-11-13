@@ -82,6 +82,8 @@ def test_api_explanation_and_incomplete(tmp_path, explanation):
     )
     client = TestClient(create_app(tmp_path))
     body = {"run_id": "test", "decision_id": "d1", "target_asset": "A"}
+    assert client.post("/explain", json=body).status_code == 409
+    body["allow_synthetic"] = True
     result = client.post("/explain", json=body)
     assert result.status_code == 200
     assert result.json()["predicted_weight"] == pytest.approx(0.65)

@@ -5,6 +5,7 @@ an order-book simulator or the team's Gymnasium training environment.
 """
 
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -70,6 +71,52 @@ def rebalance_with_costs(
     )
 
 
+def _validate_execution_schedule(prices, test_index, schedule, session_timezone):
+    """Bind aware timestamps to daily session labels before calling any policy.
+
+    Labels use the declared session timezone (index timezone, or UTC, by default).
+    This validates ordering, not exchange close times or raw data availability.
+    """
+    if not schedule.index.equals(test_index) or not schedule.columns.is_unique:
+        raise DataContractError("execution schedule dates must match test exactly")
+    if not {"decision_at", "execution_at"}.issubset(schedule):
+        raise DataContractError("schedule requires decision_at and execution_at")
+    try:
+        zone = ZoneInfo(session_timezone or str(prices.index.tz or "UTC"))
+    except (ValueError, KeyError, TypeError) as exc:
+        raise DataContractError("invalid session timezone") from exc
+    validated, prior_execution = {}, None
+    for day in test_index:
+        previous_day = prices.index[prices.index.get_loc(day) - 1]
+        try:
+            decision = pd.Timestamp(schedule.loc[day, "decision_at"])
+            execution = pd.Timestamp(schedule.loc[day, "execution_at"])
+        except (ValueError, TypeError) as exc:
+            raise DataContractError("invalid decision/execution timestamp") from exc
+        if (
+            pd.isna(decision)
+            or pd.isna(execution)
+            or decision.tzinfo is None
+            or execution.tzinfo is None
+            or decision >= execution
+        ):
+            raise DataContractError(
+                "decision/execution timestamps must be aware and ordered"
+            )
+        if (
+            decision.tz_convert(zone).date() != previous_day.date()
+            or execution.tz_convert(zone).date() != day.date()
+        ):
+            raise DataContractError(
+                "timestamps must match prior/current price sessions"
+            )
+        if prior_execution is not None and decision < prior_execution:
+            raise DataContractError("decision precedes previous session execution")
+        validated[day] = (decision.tz_convert("UTC"), execution.tz_convert("UTC"))
+        prior_execution = execution
+    return validated
+
+
 def run_backtest(
     prices: pd.DataFrame,
     policy: Policy,
@@ -77,6 +124,9 @@ def run_backtest(
     test_start,
     test_end,
     config: SimulationConfig | None = None,
+    execution_schedule: pd.DataFrame | None = None,
+    session_timezone: str | None = None,
+    risk_tags=(),
 ) -> BacktestResult:
     config = config or SimulationConfig()
     validate_prices(prices)
@@ -84,9 +134,19 @@ def run_backtest(
     test = prices.loc[start:end]
     if test.empty:
         raise DataContractError("no test prices in requested interval")
+    registry = {tag.tag_id: tag for tag in risk_tags}
+    if len(registry) != len(risk_tags):
+        raise DataContractError("duplicate risk tag IDs")
     first_pos = prices.index.get_loc(test.index[0])
     if first_pos == 0:
         raise DataContractError("at least one pre-test observation is required")
+    schedule_times = (
+        _validate_execution_schedule(
+            prices, test.index, execution_schedule, session_timezone
+        )
+        if execution_schedule is not None
+        else None
+    )
     if prices.shape[1] * config.max_asset_weight < 1 - 1e-10:
         raise DataContractError("asset count cannot satisfy target weight constraints")
     if policy.rebalance not in {"daily", "monthly"}:
@@ -101,6 +161,23 @@ def run_backtest(
     for date, price_row in test.iterrows():
         pos = prices.index.get_loc(date)
         previous_date = prices.index[pos - 1]
+        if execution_schedule is None:
+            # Ordering placeholders for synthetic/reference runs, NOT exchange times.
+            decision_at = (
+                pd.Timestamp(previous_date).tz_localize("UTC")
+                if previous_date.tzinfo is None
+                else previous_date.tz_convert("UTC")
+            )
+            execution_at = (
+                pd.Timestamp(date).tz_localize("UTC")
+                if date.tzinfo is None
+                else date.tz_convert("UTC")
+            )
+            time_status = "assumed_daily_order_not_exchange_clock"
+        else:
+            decision_at, execution_at = schedule_times[date]
+            time_status = "caller_supplied_schedule"
+        used_tag_ids = []
         previous_price = prices.iloc[pos - 1].to_numpy()
         current = units * previous_price / previous_equity
         is_month_start = previous_date.month != date.month
@@ -114,6 +191,20 @@ def run_backtest(
         elif regular:
             # A copy prevents a policy from modifying the shared market table.
             allocation = policy.target(prices.iloc[:pos].copy(), current.copy())
+            used_tag_ids = list(allocation.risk_tag_ids)
+            if len(set(used_tag_ids)) != len(used_tag_ids):
+                raise DataContractError("duplicate decision risk tag IDs")
+            for tag_id in used_tag_ids:
+                if execution_schedule is None:
+                    raise DataContractError(
+                        "risk-tag attribution requires explicit timestamps"
+                    )
+                if tag_id not in registry or not registry[tag_id].usable_at(
+                    decision_at
+                ):
+                    raise DataContractError("unknown, future or expired risk tag")
+                if registry[tag_id].asset_id not in prices.columns:
+                    raise DataContractError("risk tag asset not in portfolio")
             validate_weights(
                 allocation.weights, prices.shape[1], config.max_asset_weight
             )
@@ -171,6 +262,10 @@ def run_backtest(
                     "decision_id": f"d{date.strftime('%Y%m%d')}",
                     "decision_date": previous_date,
                     "execution_date": date,
+                    "decision_at": decision_at.tz_convert("UTC").isoformat(),
+                    "execution_at": execution_at.tz_convert("UTC").isoformat(),
+                    "time_status": time_status,
+                    "risk_tag_ids": used_tag_ids,
                     "policy_status": policy_status,
                     "reason": reason,
                     "weight_before": current.tolist(),

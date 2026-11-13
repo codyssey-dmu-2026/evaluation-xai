@@ -4,21 +4,28 @@
 
 이 문서는 현재 코드에 연결할 입력 중심이다. 상세 기준서 9절은 최종 목표 계약이므로 파일명·필드가 모두 같지는 않다. 연동 시 구현 상태 문서의 차이표를 먼저 확인한다.
 
+2026-11-13 입력 규칙 변경: 명시적 실행표의 시각은 지정한 `session_timezone`에서 직전/현재 가격 세션 날짜와 일치해야 한다. 월별 통계는 `YYYY-MM` 또는 월별 Period만 허용하고 PPO의 모든 seed를 요구한다. 국면 값 오류는 국면 검정에만 기록한다. 자세한 규칙은 [리뷰 수정 기록](review_fixes_20261113.md)을 참조한다.
+
 ## 현재 Data Pipeline 확인 결과
 
-2026-09-26 `codyssey-dmu-2026/data-pipeline` commit
-`fd63b9795c24f3239e00c553af6a552d91ac1897` 기준. 다른 팀원의 코드는 수정하지 않았다.
+2026-11-11 `codyssey-dmu-2026/data-pipeline` commit
+`755af516259adebf93a01c5b1d61ea32918e245e` 기준. 다른 팀원의 코드는 수정하지 않았다.
+실행 명령과 파일별 현재 규격은 [최신 연동 현황](team_integration_20261111.md)을 참조한다.
 
 1. 미국8+한국4자산. 이전 미국ETF10개 제안과 다르므로 임의로 변경하지 않는다.
 2. USD·KRW 가격을 그대로 합산하면 안 된다. 기준통화·당시 환율·의사결정 시각·휴장일 정책 확정 필요.
-3. 현재 `returns.parquet`는 **정규화된 수익률**. 성과에 사용하지 않는다. 정규화 전 수정주가와 계좌 순수익률을 별도 전달받는다.
-4. 현재 normalize는 단일 종료일 이전 전체 자료로 fit. WF마다 정확한4년 학습 구간에 fit한 scaler와 변수순서를 저장해야 한다.
-5. 날짜 교집합은 시장별 휴장 차이를 숨길 수 있다. 원본/통합 달력과 결측 사유 필요.
+3. 현재 `returns.parquet`는 **정규화 전 로그수익률**이다. `features_window1~4.parquet`에 구간별 정규화 피처를 저장한다. 계좌 성과에는 비용 차감 후 포트폴리오 수익률을 사용한다.
+4. 현재 구간별 scaler와 변수순서는 `walk_forward_manifest.json`에 저장한다. 학습 기간은 2018년부터 확장되므로 기존 4년 롤링 기준과 다르다. 단일 `features.parquet`는 이전 구간 평가에 그대로 사용하지 않는다.
+5. 시장 달력 합집합·forward fill·개장 플래그를 사용한다. 실제 달력 완전성·정보 가용시각과 혼합 시장 체결 규칙은 별도 확인이 필요하다.
 6. 벤치마크·RF·환율·가용시각이 아직 평가 계약으로 제공되지 않았다. 0/미래값으로 자동 대체하지 않는다.
 
 `MarketDataManifest`는 정책 명시를 요구하지만 통화변환의 경제적 정확성까지 증명하지는 못한다.
 
 ## Data Pipeline → Evaluation
+
+아래 `MarketDataManifest` 표는 참조 백테스터의 공통통화 입력 계약이다.
+현재 팀의 processed 파일을 읽는 `load_processed_window`는 별도 로더이며,
+파일 형식 검사를 통과해도 이 표의 통화·시각 검증까지 완료되는 것은 아니다.
 
 | 자료 | 내용 |
 | --- | --- |
@@ -43,7 +50,10 @@
 | SHAP background | 해당 fold 학습 rollout32개 관측과 날짜 |
 
 `sb3_weight_predictor`에 model·observation_shape·action_to_weights·필요시 preprocess 전달.
-전처리 두 번 적용 금지. torch/SB3 강제 설치나 모델 임의 역직렬화는 하지 않는다.
+전처리 두 번 적용 금지. 신뢰하는 팀 체크포인트를 명시적으로 제공한 경우만 로드한다.
+2026-11-12 모델 60개와 피처·수익률·전처리 manifest를 별도 수령했다.
+대표 모델 4개 재현·SHAP 결과는 [실제 연결 기록](real_replay_20261112.md)을 참조한다.
+가격 파일은 없어 가격 대조가 필요한 계약과 replay-only 검증을 구분한다.
 **Episode Reward는 투자수익률이 아니다.** 학습 종료 뒤에도 평가 원장은 현금 유지까지 필요하다.
 
 ## Agentic RAG → Evaluation
@@ -59,7 +69,8 @@ live에서 생성 전 가용 불가. historical_replay는 실제 생성시각을
 
 - GET /health: 상태와 실제 모델 미로드 표시.
 - GET /backtest: 전체 결과, `?run_id=mvo_WF2022`로 개별 조회.
-- POST /explain 예제: `{"run_id":"toy_policy","decision_id":"toy0","target_asset":"SYN00"}`.
+- POST /explain 합성 데모 예제: `{"run_id":"toy_policy","decision_id":"toy0","target_asset":"SYN00","allow_synthetic":true}`. 실제 설명으로 표시하지 않는다.
+- 그림: GET `/explanations/{run_id}/{decision_id}/{target_asset}/plots/summary` 또는 `/force`. 합성은 `?allow_synthetic=true` 필요. Gateway 연결은 별도 작업이다.
 - data_mode/금융 면책 문구 항상 표시. null은0으로 바꾸지 말고 이유 표시.
 - 409=설명 미생성,404=없는ID,503=결과 미준비. Streamlit은 HTTP만 사용.
 

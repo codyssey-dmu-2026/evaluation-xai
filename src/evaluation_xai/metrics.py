@@ -26,15 +26,19 @@ METRIC_NAMES = (
 def compute_metrics(
     ledger: pd.DataFrame,
     benchmark: pd.Series,
-    risk_free: pd.Series,
+    risk_free: pd.Series | None,
     *,
     period_start: date | pd.Timestamp,
     annualization: int = 252,
 ) -> dict:
     validate_ledger(ledger)
     b = aligned_series(benchmark, ledger.index, "benchmark")
-    rf = aligned_series(risk_free, ledger.index, "risk_free")
-    if (b <= -1).any() or (rf <= -1).any():
+    rf = (
+        None
+        if risk_free is None
+        else aligned_series(risk_free, ledger.index, "risk_free")
+    )
+    if (b <= -1).any() or (rf is not None and (rf <= -1).any()):
         raise DataContractError(
             "benchmark and RF must be simple returns greater than -1"
         )
@@ -50,7 +54,7 @@ def compute_metrics(
             "positive evaluation duration and annualization required"
         )
     r = ledger.net_return_simple.to_numpy(dtype=float)
-    excess = r - rf
+    excess = None if rf is None else r - rf
     active = r - b
     equity = np.r_[ledger.equity_start.iloc[0], ledger.equity_end.to_numpy()]
     cumulative = equity[-1] / equity[0] - 1
@@ -94,12 +98,16 @@ def compute_metrics(
     else:
         scale = np.sqrt(annualization)
         put("annualized_volatility", np.std(r, ddof=1) * scale)
-        ratio("sharpe", excess.mean(), np.std(excess, ddof=1), scale)
-        downside = np.sqrt(np.mean(np.minimum(excess, 0) ** 2))
-        ratio("sortino", excess.mean(), downside, scale)
+        if excess is not None:
+            ratio("sharpe", excess.mean(), np.std(excess, ddof=1), scale)
+            downside = np.sqrt(np.mean(np.minimum(excess, 0) ** 2))
+            ratio("sortino", excess.mean(), downside, scale)
         ratio("information_ratio", active.mean(), np.std(active, ddof=1), scale)
-        market_excess = b - rf
-        if np.std(market_excess, ddof=1) <= 1e-12:
+        market_excess = None if rf is None else b - rf
+        if market_excess is None:
+            for name in ("sharpe", "sortino", "alpha", "beta"):
+                put(name, reason="risk_free_not_provided")
+        elif np.std(market_excess, ddof=1) <= 1e-12:
             put("alpha", reason="constant_market_excess_return")
             put("beta", reason="constant_market_excess_return")
         else:

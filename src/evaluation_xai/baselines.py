@@ -15,6 +15,7 @@ class Allocation:
     weights: np.ndarray
     status: str = "ok"
     reason: str | None = None
+    risk_tag_ids: tuple[str, ...] = ()
 
 
 class Policy(Protocol):

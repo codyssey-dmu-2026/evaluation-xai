@@ -126,5 +126,11 @@ def run_demo(output_directory, *, with_shap=False, first_year=2022, last_year=20
             "status": "explanation_only_not_backtested",
         }
         render_explanations(explanations, output / "plots", "SYN00")
+        bundle["plot_artifacts"] = {
+            "toy_policy/toy0/SYN00": {
+                "summary": "plots/shap_summary.png",
+                "force": "plots/shap_force.html",
+            }
+        }
     write_json(output / "evaluation.json", bundle)
     return bundle

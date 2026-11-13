@@ -1,13 +1,17 @@
 # Evaluation & XAI
 
 에이전틱 RAG + 강화학습 로보어드바이저의 **평가·설명 가능성 모듈**.
-정제 데이터와 PPO 모델을 기다리지 않고 계산·검증·연동 코드를 합성 데이터로 먼저 개발한다.
+팀의 일별 평가 CSV를 분석하고, 학습 입력과 PPO 모델을 받아 성과·통계·SHAP을 계산한다.
+현재 공개 CSV 64개 실행을 분석했고, 전달된 학습 입력으로 대표 PPO 4개 구간의 재현과 SHAP 설명을 확인했다.
 
 > 데모는 가상 가격과 예시 정책을 사용한다. 실제 투자 성과, PPO 학습 완료,
 > 과제 성능 기준 충족을 의미하지 않는다. 수집·전처리와 PPO 학습은 다른 팀원의 역할이다.
 
 ## 평가 기준부터 읽기
 
+- [리뷰 수정·입력 규칙 (2026-11-13)](docs/review_fixes_20261113.md): 거래 시각·월·seed 검증, 국면 오류 격리. 로컬 테스트 121개 통과.
+- **[실제 PPO·SHAP 결과와 실행 방법 (2026-11-12)](docs/real_replay_20261112.md)**: 받은 데이터 검사, 대표 4개 실행 재현, 설명 그림·API.
+- [팀 연동 현황 (2026-11-11)](docs/team_integration_20261111.md): CSV 분석과 기존 기준의 차이.
 - **[평가 기준 요약](docs/evaluation_criteria.md)**: 과제 필수조건, 담당자가 정한 기본값, 목표 판정 방법.
 - **[상세 기준서](docs/evaluation_specification.md)**: 12개 지표 계산식, Walk-Forward, 거래·통계·SHAP 기준과 목표 전달 규격.
 - **[현재 구현 상태와 차이](docs/implementation_status.md)**: 기준서 중 구현된 항목과 실자료 연동·검증이 남은 항목.
@@ -38,16 +42,17 @@ Matplotlib 캐시 권한 경고가 있으면 `MPLCONFIGDIR=/tmp/evaluation-mpl`�
 
 | 기능 | 현재 상태 |
 | --- | --- |
+| 팀 자료 입력 | `import-rl`로 일별 CSV·메타데이터 검사, `check-data`로 processed 파일 검사 |
 | 12개 성과지표 | 원장 검사 후 계산. 계산 불가 값은 0 대신 null과 사유 반환 |
 | 동일가중·MVO | 월간 리밸런싱, MVO 252일 공분산·비중 상한 40%·공매도 금지 |
 | 참조 백테스터 | 비용·다음 종가 체결·MDD 보호·종료까지 현금 기록 |
 | Walk-Forward | 4년 학습/1년 테스트 일정, 구간마다 새 학습 함수 호출 |
-| 통계 | 월별/seed 집계, One-/Two-way ANOVA, η², 조건부 Tukey, Holm, 블록 부트스트랩 |
-| SHAP | 그룹별 기여도 계산, Summary·Force Plot, SB3 형태 모델 연결 어댑터 |
-| 평가 API | /health, /backtest, /explain: 사전 계산 결과 조회 |
+| 통계 | `anova`로 3종 개별 실행. 자료가 부족한 검정만 미완료, 가능한 결과 보존 |
+| SHAP | `explain-ppo`로 실제 환경 재사용. 4개 구간 대표 모델 재실행과 설명 4건 검증 |
+| 평가 API | /health, /backtest, /explain 및 PNG/HTML 조회. 합성 설명은 명시적 opt-in 필요 |
 | 팀 전달 규격 | 가격·계좌 원장·모델·risk tag, 데이터 파이프라인 연동 주의점 |
 
-아직 미완료: 실제 PPO 학습/평가, 실데이터 3종 ANOVA, 실제 모델 SHAP,
+아직 미완료: 60개 PPO 전체 재평가·원본 가격/FX 대조, 실데이터 ANOVA 검정 2·3, 모든 결정 SHAP,
 신규 의사결정 5초 이내 설명, 전체 대시보드, 20페이지 보고서, 보너스 통합.
 `toy_policy`는 PPO가 아니며 MVO 성과의 설명으로 연결하지 않는다.
 
@@ -95,7 +100,8 @@ python -m pytest --cov=evaluation_xai
 누락 seed/기준전략 복제 차단, SHAP 가산성, 날짜/비중/API 입력 검사.
 GitHub Actions에는 Python 3.12/3.13 테스트를 설정했다.
 `requirements.txt`는 검증 환경의 고정 버전, `pyproject.toml`은 호환 범위이다.
-실제 RL의 torch/SB3 버전은 모델 담당자와 맞춘 뒤 추가한다.
+실제 PPO 설명용 의존성은 `requirements-rl.txt`로 별도 설치한다.
+전달된 대표 모델 4개의 일별 결과를 재실행해 팀 CSV와 대조했다. 나머지 모델·프로토콜 검증은 남아 있다.
 `.env`, 모델, 원본 데이터, 생성 결과, 가상환경은 Git에서 제외한다.
 
 ## Docker — 평가 API만
