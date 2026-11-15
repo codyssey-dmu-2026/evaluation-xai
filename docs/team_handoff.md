@@ -1,3 +1,7 @@
+> 2026-11-15 추가: `compare-rl` 월간 비교군·PPO 재실행·실제 ANOVA 묶음을 제공한다.
+> 프로필·원본 대조 불일치·파일 경로·남은 입력은 [최신 전달 기록](rl_comparison_20261115.md)을 참조한다.
+> 기존 import 결과·SHAP 폴더와 자동 병합되지 않으며, 과제 최종 판정은 보류다.
+
 # 팀 전달 자료와 연결 계약
 
 [평가 기준 요약](evaluation_criteria.md) · [상세 기준서](evaluation_specification.md) · [구현 상태와 차이](implementation_status.md)

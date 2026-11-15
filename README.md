@@ -2,13 +2,15 @@
 
 에이전틱 RAG + 강화학습 로보어드바이저의 **평가·설명 가능성 모듈**.
 팀의 일별 평가 CSV를 분석하고, 학습 입력과 PPO 모델을 받아 성과·통계·SHAP을 계산한다.
-현재 공개 CSV 64개 실행을 분석했고, 전달된 학습 입력으로 대표 PPO 4개 구간의 재현과 SHAP 설명을 확인했다.
+공개 CSV 64개 실행 분석과 대표 SHAP 4건에 이어, PPO 36개·월간 비교군 8개·일간 EW 대조군 4개를 실행했다.
+실제 ANOVA 3종을 계산했으며 원본 CSV 대조 불일치 1개를 포함해 잠정 결과로 표시한다.
 
 > 데모는 가상 가격과 예시 정책을 사용한다. 실제 투자 성과, PPO 학습 완료,
 > 과제 성능 기준 충족을 의미하지 않는다. 수집·전처리와 PPO 학습은 다른 팀원의 역할이다.
 
 ## 평가 기준부터 읽기
 
+- **[월간 비교군·실제 ANOVA 결과 (2026-11-15)](docs/rl_comparison_20261115.md)**: 동일 로컬 실행 커널, 원본 대조 35/36 PPO 통과·1개 불일치, 테스트 146개.
 - [리뷰 수정·입력 규칙 (2026-11-13)](docs/review_fixes_20261113.md): 거래 시각·월·seed 검증, 국면 오류 격리. 로컬 테스트 121개 통과.
 - **[실제 PPO·SHAP 결과와 실행 방법 (2026-11-12)](docs/real_replay_20261112.md)**: 받은 데이터 검사, 대표 4개 실행 재현, 설명 그림·API.
 - [팀 연동 현황 (2026-11-11)](docs/team_integration_20261111.md): CSV 분석과 기존 기준의 차이.
@@ -44,17 +46,31 @@ Matplotlib 캐시 권한 경고가 있으면 `MPLCONFIGDIR=/tmp/evaluation-mpl`�
 | --- | --- |
 | 팀 자료 입력 | `import-rl`로 일별 CSV·메타데이터 검사, `check-data`로 processed 파일 검사 |
 | 12개 성과지표 | 원장 검사 후 계산. 계산 불가 값은 0 대신 null과 사유 반환 |
-| 동일가중·MVO | 월간 리밸런싱, MVO 252일 공분산·비중 상한 40%·공매도 금지 |
+| 동일가중·MVO | 가격/수익률 경로, 월간·252개 관측·목표 상한 40%. 실제 RL 커널에서 보유일 비용 0 확인 |
 | 참조 백테스터 | 비용·다음 종가 체결·MDD 보호·종료까지 현금 기록 |
 | Walk-Forward | 4년 학습/1년 테스트 일정, 구간마다 새 학습 함수 호출 |
-| 통계 | `anova`로 3종 개별 실행. 자료가 부족한 검정만 미완료, 가능한 결과 보존 |
+| 통계 | `compare-rl`에서 실제 월별 표본과 사전 국면 생성, 3종 ANOVA·조건부 Tukey·Holm 계산 |
 | SHAP | `explain-ppo`로 실제 환경 재사용. 4개 구간 대표 모델 재실행과 설명 4건 검증 |
 | 평가 API | /health, /backtest, /explain 및 PNG/HTML 조회. 합성 설명은 명시적 opt-in 필요 |
 | 팀 전달 규격 | 가격·계좌 원장·모델·risk tag, 데이터 파이프라인 연동 주의점 |
 
-아직 미완료: 60개 PPO 전체 재평가·원본 가격/FX 대조, 실데이터 ANOVA 검정 2·3, 모든 결정 SHAP,
+아직 미완료: 원본 CSV 불일치 1개 원인 규명, 나머지 PPO 24개 재실행·원본 가격/FX/RF 대조, 모든 결정 SHAP,
 신규 의사결정 5초 이내 설명, 전체 대시보드, 20페이지 보고서, 보너스 통합.
 `toy_policy`는 PPO가 아니며 MVO 성과의 설명으로 연결하지 않는다.
+
+## 실제 월간 비교 실행
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/codyssey-mpl OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+.venv/bin/python -m evaluation_xai compare-rl \
+  --models-dir ../models --processed-dir ../data/processed \
+  --rl-source-dir ../rl-engine/src --output artifacts/my-new-comparison
+```
+
+선택적 의존성은 `requirements-rl.txt`를 사용한다. 기존 출력은 덮어쓰지 않는다.
+통계는 전부 로컬 재실행 수익률로 만들며, 일간 EW 대조군과 월간 EW를 섞지 않는다.
+전략 비교 p=0.580897, 전략×국면 p=0.904003으로 비유의다. 국면 효과만 Holm p=0.013860이다.
+등분산·시계열 의존성의 한계가 있는 탐색적 결과이며, 자세한 조건과 산출물은 [실행 기록](docs/rl_comparison_20261115.md)을 참조한다.
 
 ## 생성 결과
 
@@ -101,7 +117,8 @@ python -m pytest --cov=evaluation_xai
 GitHub Actions에는 Python 3.12/3.13 테스트를 설정했다.
 `requirements.txt`는 검증 환경의 고정 버전, `pyproject.toml`은 호환 범위이다.
 실제 PPO 설명용 의존성은 `requirements-rl.txt`로 별도 설치한다.
-전달된 대표 모델 4개의 일별 결과를 재실행해 팀 CSV와 대조했다. 나머지 모델·프로토콜 검증은 남아 있다.
+이번 비교의 PPO 36개 중 35개와 일간 EW 4개는 팀 CSV와 일치했고, PPO 1개는 낙폭 2행에서 엄격 허용오차를 초과했다.
+이를 `provisional_reference_mismatch`로 남긴다. 같은 로컬 실행의 통계 계산과 원본 재현·최종 프로토콜 판정은 별개다.
 `.env`, 모델, 원본 데이터, 생성 결과, 가상환경은 Git에서 제외한다.
 
 ## Docker — 평가 API만

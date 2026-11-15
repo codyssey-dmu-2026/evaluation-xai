@@ -16,12 +16,25 @@ from .team_import import file_hash
 from .validation import DataContractError
 
 
-def compare_daily_replay(replayed, reference_daily, meta):
+def compare_daily_replay(replayed, reference_daily, meta, *, strategy=None):
     """Fail closed on incomplete dates or a different recorded policy trajectory."""
+    report = daily_replay_report(replayed, reference_daily, meta, strategy=strategy)
+    if report["status"] != "matched":
+        fields = ", ".join(report["mismatched_fields"])
+        raise DataContractError(f"replay differs from producer CSV: {fields}")
+    return report
+
+
+def daily_replay_report(replayed, reference_daily, meta, *, strategy=None):
+    """Audit numeric disagreement without silently changing the strict tolerances.
+
+    A mismatch report is not a successful reproduction. Structural or nonfinite
+    inputs still raise; newly replayed statistics must never substitute CSV rows.
+    """
     reference = pd.read_csv(reference_daily, dtype={"seed": str})
     reference = reference.loc[
         (reference.window == meta["window"])
-        & (reference.strategy == f"PPO-{meta['variant']}")
+        & (reference.strategy == (strategy or f"PPO-{meta['variant']}"))
         & (reference.seed == str(meta["seed"]))
     ].copy()
     reference["date"] = pd.to_datetime(reference.date)
@@ -30,7 +43,7 @@ def compare_daily_replay(replayed, reference_daily, meta):
         raise DataContractError(
             "replay/reference dates differ or selected run is absent"
         )
-    errors = {}
+    errors, mismatches = {}, {}
     for field in (
         "net_return",
         "portfolio_value",
@@ -41,19 +54,24 @@ def compare_daily_replay(replayed, reference_daily, meta):
     ):
         actual = replayed[field].to_numpy(dtype=float)
         expected = reference[field].to_numpy(dtype=float)
-        if not np.isfinite(expected).all() or not np.allclose(
-            actual, expected, atol=1e-8, rtol=1e-6
-        ):
-            raise DataContractError(f"replay differs from producer CSV: {field}")
+        if not np.isfinite(expected).all() or not np.isfinite(actual).all():
+            raise DataContractError(f"nonfinite replay/reference field: {field}")
+        different = ~np.isclose(actual, expected, atol=1e-8, rtol=1e-6)
+        if different.any():
+            mismatches[field] = {
+                "rows": int(different.sum()),
+                "dates": [str(d.date()) for d in replayed.index[different]],
+            }
         errors[field] = float(np.max(np.abs(actual - expected)))
     return {
-        "status": "matched",
+        "status": "matched" if not mismatches else "mismatch",
+        "mismatched_fields": mismatches,
         "rows": len(replayed),
         "atol": 1e-8,
         "rtol": 1e-6,
         "max_absolute_errors": errors,
         "reference_sha256": file_hash(reference_daily),
-        "scope": "reproduces_producer_run_not_financial_protocol_acceptance",
+        "scope": "producer_reproduction_check_not_financial_protocol_acceptance",
     }
 
 

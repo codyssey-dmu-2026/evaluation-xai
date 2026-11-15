@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
-from .validation import DataContractError, validate_weights
+from .validation import DataContractError, validate_index, validate_weights
 
 
 @dataclass
@@ -16,6 +16,7 @@ class Allocation:
     status: str = "ok"
     reason: str | None = None
     risk_tag_ids: tuple[str, ...] = ()
+    diagnostics: dict | None = None
 
 
 class Policy(Protocol):
@@ -45,14 +46,35 @@ class MinimumVariance:
         self.window, self.max_weight = window, max_weight
 
     def target(self, history, current_weights):
+        if len(history) < self.window + 1:
+            raise DataContractError(
+                "MVO needs window returns and their preceding price"
+            )
+        returns = history.iloc[-self.window - 1 :].pct_change(fill_method=None).iloc[1:]
+        return self.target_returns(returns, current_weights)
+
+    def target_returns(self, simple_returns, current_weights=None):
+        """Optimize on the last window raw SIMPLE returns supplied by the caller.
+
+        The caller must cut history at the decision date. No prices are fabricated,
+        and no normalization or log-return conversion is inferred here.
+        """
+        history = simple_returns
+        validate_index(history.index, "MVO return history")
         n = history.shape[1]
         if n * self.max_weight < 1 - 1e-10:
             raise DataContractError(
                 "MVO constraints are infeasible for this asset count"
             )
-        if len(history) < self.window + 1:
-            raise DataContractError("MVO needs 252 returns and their preceding price")
-        returns = history.iloc[-self.window - 1 :].pct_change(fill_method=None).iloc[1:]
+        if len(history) < self.window:
+            raise DataContractError(f"MVO needs {self.window} simple returns")
+        returns = history.iloc[-self.window :]
+        if (
+            not history.columns.is_unique
+            or not np.isfinite(returns.to_numpy(dtype=float)).all()
+            or (returns <= -1).any().any()
+        ):
+            raise DataContractError("MVO requires finite simple returns > -1")
         covariance = returns.cov().to_numpy()
         if not np.isfinite(covariance).all():
             raise DataContractError("MVO covariance contains missing values")
@@ -74,9 +96,25 @@ class MinimumVariance:
         )
         try:
             validate_weights(result.x, n, self.max_weight)
-            valid = result.success
+            constraints_valid = True
         except DataContractError:
-            valid = False
+            constraints_valid = False
+        valid = result.success and constraints_valid
+        diagnostics = {
+            "solver": "SLSQP",
+            "success": bool(result.success),
+            "constraints_valid": constraints_valid,
+            "message": str(result.message),
+            "iterations": int(result.nit),
+            "objective_variance": (
+                float(result.fun) if np.isfinite(result.fun) else None
+            ),
+            "observations": len(returns),
+            "history_start": str(returns.index[0].date()),
+            "history_end": str(returns.index[-1].date()),
+        }
         if not valid:
-            return Allocation(initial, "fallback", str(result.message))
-        return Allocation(np.asarray(result.x))
+            return Allocation(
+                initial, "fallback", str(result.message), diagnostics=diagnostics
+            )
+        return Allocation(np.asarray(result.x), diagnostics=diagnostics)

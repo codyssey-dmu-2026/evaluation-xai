@@ -109,7 +109,11 @@ def test_mvo_fallback_is_recorded(prices, monkeypatch):
     monkeypatch.setattr(
         "evaluation_xai.baselines.minimize",
         lambda *a, **k: SimpleNamespace(
-            x=np.array([1.0, 0.0, 0.0]), success=False, message="test failure"
+            x=np.array([1.0, 0.0, 0.0]),
+            success=False,
+            message="test failure",
+            nit=1000,
+            fun=0.1,
         ),
     )
     result = MinimumVariance().target(prices, np.zeros(3))

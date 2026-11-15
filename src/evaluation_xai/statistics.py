@@ -49,7 +49,12 @@ def mission_anova(rewards, strategies, strategy_regime):
     adjusted = multipletests([e["p_value"] for e in effects], method="holm")[1]
     for effect, p_value in zip(effects, adjusted):
         effect["p_holm_family"] = float(p_value)
-    return {"status": "ok", "tests": results, "holm_family_size": len(effects)}
+    return {
+        "status": "ok",
+        "tests": results,
+        "holm_status": "complete",
+        "holm_family_size": len(effects),
+    }
 
 
 def monthly_returns(daily: pd.Series) -> pd.Series:
@@ -79,6 +84,43 @@ def market_regimes(benchmark_prices: pd.Series, months, lookback=60, threshold=0
             else "down" if change < -threshold else "sideways"
         )
     return result
+
+
+def regimes_from_log_returns(benchmark, months, lookback=60, threshold=0.05):
+    """Pre-month regime and audit trail using raw log returns, not invented prices.
+
+    Observations follow the supplied union-market calendar, including zero returns
+    on SPY-closed sessions. They are not certified US exchange trading days.
+    """
+    validate_index(benchmark.index, "benchmark log returns")
+    if lookback < 1 or not np.isfinite(threshold) or threshold <= 0:
+        raise DataContractError("invalid regime settings")
+    if not np.isfinite(benchmark.to_numpy(dtype=float)).all():
+        raise DataContractError("nonfinite benchmark log returns")
+    rows = []
+    for month in months:
+        period = pd.Period(month, freq="M")
+        history = benchmark.loc[benchmark.index < period.start_time].tail(lookback)
+        if len(history) != lookback:
+            raise DataContractError(f"insufficient pre-month history: {period}")
+        change = float(np.expm1(history.sum()))
+        if not np.isfinite(change) or change <= -1:
+            raise DataContractError("invalid compounded benchmark return")
+        rows.append(
+            {
+                "month": str(period),
+                "regime": (
+                    "up"
+                    if change > threshold
+                    else "down" if change < -threshold else "sideways"
+                ),
+                "trailing_return": change,
+                "history_start": str(history.index[0].date()),
+                "history_end": str(history.index[-1].date()),
+                "observations": lookback,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def normalize_monthly_samples(frame: pd.DataFrame):

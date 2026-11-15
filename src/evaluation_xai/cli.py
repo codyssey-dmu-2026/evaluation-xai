@@ -42,10 +42,31 @@ def main():
         "--reference-daily", help="Match this producer CSV before publishing SHAP"
     )
     xai.add_argument("--output", required=True)
+    comparison = commands.add_parser(
+        "compare-rl", help="Replay 36 PPO runs and monthly return-based baselines"
+    )
+    comparison.add_argument("--models-dir", required=True)
+    comparison.add_argument("--processed-dir", required=True)
+    comparison.add_argument("--rl-source-dir", required=True)
+    comparison.add_argument("--output", required=True)
     args = parser.parse_args()
-    if args.command in {"check-data", "anova", "explain-ppo"}:
+    if args.command in {"check-data", "anova", "explain-ppo", "compare-rl"}:
         try:
-            if args.command == "check-data":
+            if args.command == "compare-rl":
+                from .rl_comparison import run_comparison
+
+                result = run_comparison(
+                    args.models_dir, args.processed_dir, args.rl_source_dir, args.output
+                )
+                print(f"Provisional comparison: {args.output}/evaluation.json")
+                print(result["reference_reconciliation"])
+                print(
+                    {
+                        k: v["status"]
+                        for k, v in result["mission_anova"]["tests"].items()
+                    }
+                )
+            elif args.command == "check-data":
                 from .data_loader import load_processed_window
 
                 data = load_processed_window(
