@@ -1,5 +1,6 @@
 """Replay an explicitly supplied trusted RL checkpoint with its original inputs."""
 
+import hashlib
 import importlib.util
 from pathlib import Path
 from time import perf_counter
@@ -12,8 +13,18 @@ from .adapters import rl_observation_groups, sb3_weight_predictor
 from .artifacts import read_json, write_json
 from .data_loader import load_processed_window
 from .explain import explain_weights, render_explanations
+from .provenance import runtime_info
 from .team_import import file_hash
 from .validation import DataContractError
+
+# Strict producer-reproduction tolerance. Do not widen to make a run pass.
+ATOL, RTOL = 1e-8, 1e-6
+
+
+def observation_sha256(observation):
+    """Exact identity of a policy input; any bit difference is a different input."""
+    array = np.ascontiguousarray(np.asarray(observation, dtype=np.float32))
+    return hashlib.sha256(array.tobytes()).hexdigest()
 
 
 def compare_daily_replay(replayed, reference_daily, meta, *, strategy=None):
@@ -31,7 +42,11 @@ def daily_replay_report(replayed, reference_daily, meta, *, strategy=None):
     A mismatch report is not a successful reproduction. Structural or nonfinite
     inputs still raise; newly replayed statistics must never substitute CSV rows.
     """
-    reference = pd.read_csv(reference_daily, dtype={"seed": str})
+    # round_trip parsing: the default fast parser can be off by one ulp, which
+    # would hide whether a replay is bitwise identical to the producer's CSV.
+    reference = pd.read_csv(
+        reference_daily, dtype={"seed": str}, float_precision="round_trip"
+    )
     reference = reference.loc[
         (reference.window == meta["window"])
         & (reference.strategy == (strategy or f"PPO-{meta['variant']}"))
@@ -43,7 +58,7 @@ def daily_replay_report(replayed, reference_daily, meta, *, strategy=None):
         raise DataContractError(
             "replay/reference dates differ or selected run is absent"
         )
-    errors, mismatches = {}, {}
+    errors, mismatches, exact, ratios = {}, {}, {}, {}
     for field in (
         "net_return",
         "portfolio_value",
@@ -56,20 +71,27 @@ def daily_replay_report(replayed, reference_daily, meta, *, strategy=None):
         expected = reference[field].to_numpy(dtype=float)
         if not np.isfinite(expected).all() or not np.isfinite(actual).all():
             raise DataContractError(f"nonfinite replay/reference field: {field}")
-        different = ~np.isclose(actual, expected, atol=1e-8, rtol=1e-6)
+        different = ~np.isclose(actual, expected, atol=ATOL, rtol=RTOL)
         if different.any():
             mismatches[field] = {
                 "rows": int(different.sum()),
                 "dates": [str(d.date()) for d in replayed.index[different]],
             }
-        errors[field] = float(np.max(np.abs(actual - expected)))
+        absolute = np.abs(actual - expected)
+        errors[field] = float(np.max(absolute))
+        exact[field] = int((actual == expected).sum())
+        # >1 means outside the unchanged tolerance; diagnostic only, never a pass.
+        ratios[field] = float(np.max(absolute / (ATOL + RTOL * np.abs(expected))))
     return {
         "status": "matched" if not mismatches else "mismatch",
         "mismatched_fields": mismatches,
         "rows": len(replayed),
-        "atol": 1e-8,
-        "rtol": 1e-6,
+        "atol": ATOL,
+        "rtol": RTOL,
         "max_absolute_errors": errors,
+        "exact_equal_rows": exact,
+        "max_tolerance_ratio": ratios,
+        "bitwise_identical": all(v == len(replayed) for v in exact.values()),
         "reference_sha256": file_hash(reference_daily),
         "scope": "producer_reproduction_check_not_financial_protocol_acceptance",
     }
@@ -228,6 +250,7 @@ def explain_checkpoint(
     explanation["model_kind"] = "real_ppo_checkpoint"
     explanation["background_dates"] = [history_dates[i] for i in selection]
     explanation["decision_date"] = str(target.date())
+    explanation["observation_sha256"] = observation_sha256(obs)
     explanation["time_status"] = "date_only_upstream_clock_not_verified"
     run_id = model_path.stem.replace(".", "p")
     decision_id = f"d{target:%Y%m%d}"
@@ -264,6 +287,7 @@ def explain_checkpoint(
             "manifest_sha256": file_hash(
                 Path(processed_dir) / "walk_forward_manifest.json"
             ),
+            "runtime": runtime_info(),
         },
         "runs": {
             run_id: {

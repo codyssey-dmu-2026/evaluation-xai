@@ -43,27 +43,65 @@ def main():
     )
     xai.add_argument("--output", required=True)
     comparison = commands.add_parser(
-        "compare-rl", help="Replay 36 PPO runs and monthly return-based baselines"
+        "compare-rl",
+        help="Replay PPO runs and monthly return-based baselines (resumable)",
     )
     comparison.add_argument("--models-dir", required=True)
     comparison.add_argument("--processed-dir", required=True)
     comparison.add_argument("--rl-source-dir", required=True)
     comparison.add_argument("--output", required=True)
+    comparison.add_argument(
+        "--all-variants",
+        action="store_true",
+        help="Also replay lambda 0.5/5.0 (60 PPO); ANOVA keeps the predeclared set",
+    )
+    comparison.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue a failed run in the same folder; refuses changed inputs",
+    )
+    comparison.add_argument(
+        "--link-explanation",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Existing explain-ppo bundle; attached only if the observation matches",
+    )
     args = parser.parse_args()
     if args.command in {"check-data", "anova", "explain-ppo", "compare-rl"}:
         try:
             if args.command == "compare-rl":
-                from .rl_comparison import run_comparison
+                from .rl_comparison import ANOVA_VARIANTS, run_comparison
+                from .team_import import VARIANTS
 
                 result = run_comparison(
-                    args.models_dir, args.processed_dir, args.rl_source_dir, args.output
+                    args.models_dir,
+                    args.processed_dir,
+                    args.rl_source_dir,
+                    args.output,
+                    variants=VARIANTS if args.all_variants else ANOVA_VARIANTS,
+                    resume=args.resume,
+                    explanation_dirs=args.link_explanation,
                 )
+                reconciliation = result["reference_reconciliation"]
                 print(f"Provisional comparison: {args.output}/evaluation.json")
-                print(result["reference_reconciliation"])
+                print(
+                    {
+                        k: reconciliation[k]
+                        for k in ("status", "mismatched_runs", "matched_run_count")
+                    }
+                )
+                print(
+                    {
+                        link["source"]: link["status"]
+                        for link in result["explanation_links"]
+                    }
+                )
                 print(
                     {
                         k: v["status"]
-                        for k, v in result["mission_anova"]["tests"].items()
+                        for k, v in result["mission_anova"].items()
+                        if isinstance(v, dict) and "status" in v
                     }
                 )
             elif args.command == "check-data":

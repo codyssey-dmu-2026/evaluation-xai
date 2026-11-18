@@ -2,15 +2,16 @@
 
 에이전틱 RAG + 강화학습 로보어드바이저의 **평가·설명 가능성 모듈**.
 팀의 일별 평가 CSV를 분석하고, 학습 입력과 PPO 모델을 받아 성과·통계·SHAP을 계산한다.
-공개 CSV 64개 실행 분석과 대표 SHAP 4건에 이어, PPO 36개·월간 비교군 8개·일간 EW 대조군 4개를 실행했다.
-실제 ANOVA 3종을 계산했으며 원본 CSV 대조 불일치 1개를 포함해 잠정 결과로 표시한다.
+공개 CSV 64개 실행 분석과 대표 SHAP 4건에 이어, PPO·월간 비교군·일간 EW 대조군을 같은 실행 커널로 재실행하고
+실제 ANOVA 3종을 계산했다. 원본 CSV 대조는 플랫폼에 따라 통과 여부가 달라지는 float32 수준 차이가 있어 잠정 결과로 표시한다.
 
 > 데모는 가상 가격과 예시 정책을 사용한다. 실제 투자 성과, PPO 학습 완료,
 > 과제 성능 기준 충족을 의미하지 않는다. 수집·전처리와 PPO 학습은 다른 팀원의 역할이다.
 
 ## 평가 기준부터 읽기
 
-- **[월간 비교군·실제 ANOVA 결과 (2026-11-15)](docs/rl_comparison_20261115.md)**: 동일 로컬 실행 커널, 원본 대조 35/36 PPO 통과·1개 불일치, 테스트 146개.
+- **[독립 리뷰·재개 가능한 60개 재실행·SHAP 연결 (2026-11-15 리뷰)](docs/review_20261115.md)**: 발견 사항, 원본 대조 불일치 조사(사실/가설 구분), 테스트 160개.
+- [월간 비교군·실제 ANOVA 결과 (2026-11-15)](docs/rl_comparison_20261115.md): 동일 로컬 실행 커널, Mac 실행 기준 PPO 35/36 허용오차 통과.
 - [리뷰 수정·입력 규칙 (2026-11-13)](docs/review_fixes_20261113.md): 거래 시각·월·seed 검증, 국면 오류 격리. 로컬 테스트 121개 통과.
 - **[실제 PPO·SHAP 결과와 실행 방법 (2026-11-12)](docs/real_replay_20261112.md)**: 받은 데이터 검사, 대표 4개 실행 재현, 설명 그림·API.
 - [팀 연동 현황 (2026-11-11)](docs/team_integration_20261111.md): CSV 분석과 기존 기준의 차이.
@@ -54,7 +55,7 @@ Matplotlib 캐시 권한 경고가 있으면 `MPLCONFIGDIR=/tmp/evaluation-mpl`�
 | 평가 API | /health, /backtest, /explain 및 PNG/HTML 조회. 합성 설명은 명시적 opt-in 필요 |
 | 팀 전달 규격 | 가격·계좌 원장·모델·risk tag, 데이터 파이프라인 연동 주의점 |
 
-아직 미완료: 원본 CSV 불일치 1개 원인 규명, 나머지 PPO 24개 재실행·원본 가격/FX/RF 대조, 모든 결정 SHAP,
+아직 미완료: 원본 CSV 비트 단위 재현(원 실행 환경 미상), 사용자 Mac에서 60개 재실행·SHAP 연결 확인, 원본 가격/FX/RF 대조, 모든 결정 SHAP,
 신규 의사결정 5초 이내 설명, 전체 대시보드, 20페이지 보고서, 보너스 통합.
 `toy_policy`는 PPO가 아니며 MVO 성과의 설명으로 연결하지 않는다.
 
@@ -65,6 +66,8 @@ PYTHONPATH=src MPLCONFIGDIR=/tmp/codyssey-mpl OMP_NUM_THREADS=1 MKL_NUM_THREADS=
 .venv/bin/python -m evaluation_xai compare-rl \
   --models-dir ../models --processed-dir ../data/processed \
   --rl-source-dir ../rl-engine/src --output artifacts/my-new-comparison
+# 60개 전체: --all-variants, 중단 후: 같은 명령 + --resume
+# 기존 SHAP 연결(관측값이 비트 단위로 같을 때만): --link-explanation artifacts/real-20261112-w1
 ```
 
 선택적 의존성은 `requirements-rl.txt`를 사용한다. 기존 출력은 덮어쓰지 않는다.
@@ -117,8 +120,9 @@ python -m pytest --cov=evaluation_xai
 GitHub Actions에는 Python 3.12/3.13 테스트를 설정했다.
 `requirements.txt`는 검증 환경의 고정 버전, `pyproject.toml`은 호환 범위이다.
 실제 PPO 설명용 의존성은 `requirements-rl.txt`로 별도 설치한다.
-이번 비교의 PPO 36개 중 35개와 일간 EW 4개는 팀 CSV와 일치했고, PPO 1개는 낙폭 2행에서 엄격 허용오차를 초과했다.
-이를 `provisional_reference_mismatch`로 남긴다. 같은 로컬 실행의 통계 계산과 원본 재현·최종 프로토콜 판정은 별개다.
+PPO 재실행은 어느 플랫폼에서도 팀 CSV와 비트 단위로 같지 않다(목표비중 오차 약 1e-7). 엄격 허용오차 통과 실행은
+플랫폼마다 다르다(Mac 35/36, 리뷰 Linux 33/36·λ 보조 24/24). 불일치 실행은 `provisional_reference_mismatch`로 남기고
+결과 묶음에 런타임을 기록한다. 같은 로컬 실행의 통계 계산과 원본 재현·최종 프로토콜 판정은 별개다.
 `.env`, 모델, 원본 데이터, 생성 결과, 가상환경은 Git에서 제외한다.
 
 ## Docker — 평가 API만

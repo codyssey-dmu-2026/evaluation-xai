@@ -52,9 +52,16 @@ def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def load_daily(path):
-    """Require the complete published 4-fold/3-seed grid and aligned daily rows."""
-    frame = pd.read_csv(path, dtype={"strategy": str, "seed": str})
+def load_daily(path, *, exact=False):
+    """Require the complete published 4-fold/3-seed grid and aligned daily rows.
+
+    exact=True parses floats round-trip (bit-exact) for reproduction audits.
+    """
+    frame = pd.read_csv(
+        path,
+        dtype={"strategy": str, "seed": str},
+        float_precision="round_trip" if exact else None,
+    )
     if frame.empty or not set(REQUIRED).issubset(frame):
         raise DataContractError("RL daily CSV missing required columns or rows")
     frame["date"] = pd.to_datetime(frame.date, errors="raise")
